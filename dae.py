@@ -1,213 +1,617 @@
-# DAE
 
-result = pd.DataFrame()
+import time
+import numpy as np
+import pandas as pd
+import tensorflow
+from imblearn.over_sampling import SMOTE
+from C45 import C45Classifier
 
-for idx, dataset in enumerate(datasets):
+from sklearn import preprocessing
+from sklearn.preprocessing import LabelEncoder, label_binarize
+from sklearn.model_selection import StratifiedKFold
+from sklearn.metrics import accuracy_score ,roc_auc_score
+from sklearn.svm import SVC
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn import tree
 
-  labelencoder = LabelEncoder()
+from tensorflow import keras
+from tensorflow.keras import layers
+from tensorflow.keras.models import Sequential, Model
+from tensorflow.keras.layers import Dense, Activation, Input, BatchNormalization, Lambda
+from tensorflow.keras.utils import plot_model
+from tensorflow.keras import layers,regularizers
+
+from matplotlib import pyplot
+
+
+def train_orig_svc(x_train, x_test, y_train, y_test):
+  model = SVC()
+  model.fit(x_train, y_train)
+  y_pred = model.predict(x_test)
+
+  acc = accuracy_score(y_test, y_pred)
+  auc = roc_auc_score(y_test, y_pred, multi_class="ovo")
+
+  return acc, auc
+
+def train_orig_knn(x_train, x_test, y_train, y_test) :
+  knn = KNeighborsClassifier()
+  knn.fit(x_train, y_train)
+  y_pred = knn.predict(x_test)
+
+  #標籤轉換
+  # y_pred = label_binarize(y_pred, classes=yy)
+  # y_test = label_binarize(y_test, classes=yy)
+
+  #分數
+  acc = accuracy_score(y_test, y_pred)
+  auc = roc_auc_score(y_test, y_pred, multi_class="ovo")
+
+  return acc, auc
+
+
+def transfer_y(y) :
+  return np.unique(y) # 多分類AUC轉換使用
+
+
+def data_preprocess(df_train, df_test) :
+
+  x_train = df_train.drop(['Class'], axis=1)
+  x_test = df_test.drop(['Class'], axis=1)
+
+  # 特徵縮放
   minmax = preprocessing.MinMaxScaler()
+  x_train_minmax = minmax.fit_transform(x_train)
+  x_test_minmax = minmax.fit_transform(x_test)
 
-  f_time = []; f_dim = []; total_time = 0
-  svm_acc = []; svm_auc = []; svm_time = []; knn_acc = []; knn_auc = []; knn_time = []
+  x_train = pd.DataFrame(x_train_minmax, columns = x_train.columns)
+  x_test = pd.DataFrame(x_test_minmax, columns = x_test.columns)
 
-  for times in range(1,6):
+  # Label encode
+  labelencoder = LabelEncoder()
+  y_train = labelencoder.fit_transform(df_train['Class'])
+  y_test = labelencoder.fit_transform(df_test['Class'])
 
-    training = "{}-5-{}{}.dat".format(dataset, times, 'tra')
-    testing = "{}-5-{}{}.dat".format(dataset, times, 'tst')
+  return x_train, x_test, y_train, y_test
 
-    df_train = pd.read_csv('drive/My Drive/Colab Notebooks/datasets/' + dataset + '/' + training, delimiter=',')
-    df_test = pd.read_csv('drive/My Drive/Colab Notebooks/datasets/' + dataset + '/' + testing, delimiter=',')
+  # classifier
 
-    y_train = labelencoder.fit_transform(df_train['Class'])
-    y_test = labelencoder.fit_transform(df_test['Class'])
+def run_svc(x_train, x_test, y_train, y_test):
 
-    x_train = df_train.drop(['Class'], axis=1)
-    x_test = df_test.drop(['Class'], axis=1)
+  model = SVC(kernel='linear')
+  model.fit(x_train, y_train)
+  y_predict = model.predict(x_test)
 
-    #特徵縮放
-    x_train_minmax = minmax.fit_transform(x_train)
-    x_test_minmax = minmax.fit_transform(x_test)
-
-    x_train = pd.DataFrame(x_train_minmax, columns = x_train.columns)
-    x_test = pd.DataFrame(x_test_minmax, columns = x_test.columns)
-
-    unique_y = transfer_y(y_train)
-
-    #算維度
-    input_dim = x_train.shape[1]
-    y_train_class = tf.keras.utils.to_categorical(y_train)
-    nb_classes = y_train_class.shape[1]
-
-    #callback
-    my_callbacks = [
-        tf.keras.callbacks.EarlyStopping(patience=100,monitor='loss',mode='min',min_delta=0.0001,restore_best_weights=True),
-        tf.keras.callbacks.ReduceLROnPlateau(monitor='loss', factor=0.1, patience=10,min_delta=0.0001,mode='min')
-    ]
-
-    #DAE 處理
-    noise_factor = 0.5
-    x_train_noisy = x_train + noise_factor * np.random.normal(loc=0.0, scale=1.0, size=x_train.shape)
-    x_test_noisy = x_test + noise_factor * np.random.normal(loc=0.0, scale=1.0, size=x_test.shape)
-    x_train_noisy = np.clip(x_train_noisy, 0., 1.)
-    x_test_noisy = np.clip(x_test_noisy, 0., 1.)
+  return roc_auc_score(y_test, y_predict, multi_class="ovo")
 
 
-    #特徵選取時間開始
-    start1 = time.process_time()
+def run_knn(x_train, x_test, y_train, y_test):
 
-    #特徵選取
-    input_layer = Input(shape = (input_dim, ))
-    #e1
-    encoded = BatchNormalization()(input_layer)
-    encoded = Dense(input_dim, activation='relu')(encoded)
-    #e2
-    encoded = BatchNormalization()(encoded)
-    encoded = Dense(input_dim, activation='relu')(encoded)
-    #e3
-    encoded = BatchNormalization()(encoded)
-    encoded = Dense(input_dim, activation='relu')(encoded)
-    #e4
-    encoded = BatchNormalization()(encoded)
-    encoded = Dense(input_dim, activation='relu')(encoded)
-    #e5
-    encoded = BatchNormalization()(encoded)
-    encoded = Dense(input_dim, activation='relu')(encoded)
-    #e6
-    encoded = BatchNormalization()(encoded)
-    encoded = Dense(input_dim, activation='relu')(encoded)
-    #e7
-    encoded = BatchNormalization()(encoded)
-    encoded_end = Dense(input_dim, activation='relu')(encoded)
-    #D6
-    decoded = BatchNormalization()(encoded_end)
-    decoded = Dense(input_dim, activation='relu')(decoded)
-    #D5
-    decoded = BatchNormalization()(decoded)
-    decoded = Dense(input_dim, activation='relu')(decoded)
-    #D4
-    decoded = BatchNormalization()(decoded)
-    decoded = Dense(input_dim, activation='relu')(decoded)
-    #D3
-    decoded = BatchNormalization()(decoded)
-    decoded = Dense(input_dim, activation='relu')(decoded)
-    #D2
-    decoded = BatchNormalization()(decoded)
-    decoded = Dense(input_dim, activation='relu')(decoded)
-    #D1
-    decoded = BatchNormalization()(decoded)
-    decoded = Dense(input_dim, activation='relu')(decoded)
-    #output
-    decoded = BatchNormalization()(decoded)
-    output_layer = Dense(input_dim, activation='sigmoid')(decoded)
+  model = KNeighborsClassifier()
+  model.fit(x_train, y_train)
+  y_predict = model.predict(x_test)
 
-    #model
-    # ae = Model(input_layer, output_layer)
-    autoencoder = keras.Model(inputs=input_layer, outputs=output_layer)
-    autoencoder.compile(optimizer='adam', loss='binary_crossentropy')
-    autoencoder.fit(x_train, x_train,
-        epochs=100,
-        batch_size=16,
-        shuffle=True,
-        callbacks=my_callbacks)
-
-    # Use encoder part of the autoencoder for feature selection
-    encoder = keras.Model(inputs=autoencoder.input, outputs=encoded_end)
-    encoded_features_train = encoder.predict(x_train)
-    encoded_features_test = encoder.predict(x_test)
-    dim_fs = encoded_features_test.shape[1]
-
-    #特徵選取時間結束
-    end1 = time.process_time()
-    tt1 = end1 - start1
+  return roc_auc_score(y_test, y_predict, multi_class="ovo")
 
 
-    #存特徵選取後的檔案
-    x_train_ae_df = pd.DataFrame(x_train_ae)
-    x_test_ae_df = pd.DataFrame(x_test_ae)
-    y_ans_train = pd.DataFrame(y_train, columns = ["Class"])
-    y_ans_test = pd.DataFrame(y_test, columns = ["Class"])
-    df1 = x_train_ae_df.merge(y_ans_train, how='left', left_index=True, right_index=True)
-    df2 = x_test_ae_df.merge(y_ans_test, how='left', left_index=True, right_index=True)
-    # df1.to_csv('/content/drive/My Drive/Colab Notebooks/output/' + dataset + '_dae_train_' + str(times) + '.csv', index=False, encoding='utf-8')
-    # df2.to_csv('/content/drive/My Drive/Colab Notebooks/output/' + dataset + '_dae_test_' + str(times) + '.csv', index=False, encoding='utf-8')
+def run_c45(x_train, x_test, y_train, y_test):
+
+  model = C45Classifier()
+  model.fit(x_train, y_train)
+  y_predict = model.predict(x_test)
+
+  return roc_auc_score(y_test, y_predict)
 
 
-    #存各項數值
-    f_dim.append(dim_fs); f_time.append(tt1)
+def run_cart(x_train, x_test, y_train, y_test):
+  
+  model = tree.DecisionTreeClassifier()
+  model.fit(x_train, y_train)
+  y_predict = model.predict(x_test)
 
-    #分類器時間開始
-    start2 = time.process_time()
-
-    #分類器
-    svm = SVC(kernel='linear')
-    svm.fit(encoded_features_train, y_train)
-    y_predict = svm.predict(encoded_features_test)
-
-    #標籤轉換
-    y_predict_m = label_binarize(y_predict, classes=unique_y)
-    y_test_m = label_binarize(y_test, classes=unique_y)
-
-    #分數
-    acc = accuracy_score(y_test_m, y_predict_m)
-    auc = roc_auc_score(y_test_m, y_predict_m,multi_class="ovo")
-
-    #分類器時間結束
-    end2 = time.process_time()
-    tt2 = end2 - start2
-
-    #存ANS檔案
-    y_guess = pd.DataFrame(y_predict, columns = ["svm_guess"])
-    y_ans = pd.DataFrame(y_test, columns = ["true"])
-    svm_ans = y_ans.merge(y_guess, how='left', left_index=True, right_index=True)
-
-    #存各項數值
-    svm_acc.append(acc); svm_auc.append(auc); svm_time.append(tt2)
+  return roc_auc_score(y_test, y_predict)
 
 
-    start3 = time.process_time()
+def train_dae_h230(x_train, x_test):
 
-    #分類器
-    knn = KNeighborsClassifier()
-    knn.fit(encoded_features_train, y_train)
-    y_predict = knn.predict(encoded_features_test)
+  input_dim = x_train.shape[1]
+  input_layer = Input(shape = (input_dim, ))
 
-    #標籤轉換
-    y_predict_m = label_binarize(y_predict, classes=unique_y)
-    y_test_m = label_binarize(y_test, classes=unique_y)
+  #DAE 處理
+  noise_factor = 0.5
+  x_train_noisy = x_train + noise_factor * np.random.normal(loc=0.0, scale=1.0, size=x_train.shape)
+  x_test_noisy = x_test + noise_factor * np.random.normal(loc=0.0, scale=1.0, size=x_test.shape)
+  x_train_noisy = np.clip(x_train_noisy, 0., 1.)
+  x_test_noisy = np.clip(x_test_noisy, 0., 1.)
 
-    #分數
-    acc = accuracy_score(y_test_m, y_predict_m)
-    auc = roc_auc_score(y_test_m, y_predict_m, multi_class="ovo")
+  encoded = BatchNormalization()(input_layer)
+  encoded = Dense(int(input_dim*0.7), activation='relu')(encoded)
 
+  encoded = BatchNormalization()(encoded)
+  encoded_end = Dense(int(input_dim*0.4), activation='relu')(encoded)
 
-    end3 = time.process_time()
-    tt3 = end3 - start3
-    total_time = total_time + (end3 - start1)
+  decoded = BatchNormalization()(encoded_end)
+  decoded = Dense(int(input_dim*0.7), activation='relu')(decoded)
 
-    #存檔案
-    y_guess = pd.DataFrame(y_predict, columns = ["knn_guess"])
-    y_ans = pd.DataFrame(y_test, columns = ["true"])
-    knn_ans = y_ans.merge(y_guess, how='left', left_index=True, right_index=True)
-    test_ans = pd.merge(svm_ans, knn_ans, on=['true'], how='left')
-    # test_ans.to_csv('/content/drive/My Drive/Colab Notebooks/output/' + dataset + '_predict_dae_' + str(times) + '.csv', index=False, encoding='utf-8')
+  decoded = BatchNormalization()(decoded)
+  output_layer = Dense(input_dim, activation='sigmoid')(decoded)
 
-    #存各項數值
-    knn_acc.append(acc);  knn_auc.append(auc); knn_time.append(tt3)
+  # 訓練
+  autoencoder = Model(input_layer, output_layer)
+  autoencoder.compile(optimizer='adam', loss='binary_crossentropy')
+  autoencoder.fit(x_train, x_train,
+          epochs=100,
+          batch_size=16,
+          shuffle=True,
+          validation_data=(x_test, x_test))
 
+  encoder_model = Model(inputs=autoencoder.input, outputs=encoded_end)
+  x_train_encoded = encoder_model.predict(x_train)
+  x_test_encoded = encoder_model.predict(x_test)
 
-  #存結果檔案
-  new = pd.DataFrame({'dataset': dataset,
-              # 'svm_acc': np.mean(svm_acc),
-              'svm_auc': np.mean(svm_auc),
-              # 'svm_time': np.mean(svm_time),
-              # 'knn_acc': np.mean(knn_acc),
-              'knn_auc': np.mean(knn_auc),
-              # 'knn_time': np.mean(knn_time),
-              # 'f_dim': np.mean(f_dim),
-              'ae_time': np.mean(f_time),
-              'total_time': total_time
-              }, index=[idx])
+  return x_train_encoded,x_test_encoded
 
-  result = result.append(new)
+def train_dae_h240(x_train, x_test):
 
-result.to_csv('/content/drive/My Drive/Colab Notebooks/output/(ans)dae_' + dae_version + '.csv', index=False, encoding='utf-8')
+  input_dim = x_train.shape[1]
+  input_layer = Input(shape = (input_dim, ))
+
+  #DAE 處理
+  noise_factor = 0.5
+  x_train_noisy = x_train + noise_factor * np.random.normal(loc=0.0, scale=1.0, size=x_train.shape)
+  x_test_noisy = x_test + noise_factor * np.random.normal(loc=0.0, scale=1.0, size=x_test.shape)
+  x_train_noisy = np.clip(x_train_noisy, 0., 1.)
+  x_test_noisy = np.clip(x_test_noisy, 0., 1.)
+
+  encoded = BatchNormalization()(input_layer)
+  encoded = Dense(int(input_dim*0.6), activation='relu')(encoded)
+
+  encoded = BatchNormalization()(encoded)
+  encoded_end = Dense(int(input_dim*0.2), activation='relu')(encoded)
+
+  decoded = BatchNormalization()(encoded_end)
+  decoded = Dense(int(input_dim*0.6), activation='relu')(decoded)
+
+  decoded = BatchNormalization()(decoded)
+  output_layer = Dense(input_dim, activation='sigmoid')(decoded)
+
+  # 訓練
+  autoencoder = Model(input_layer, output_layer)
+  autoencoder.compile(optimizer='adam', loss='binary_crossentropy')
+  autoencoder.fit(x_train, x_train,
+          epochs=100,
+          batch_size=16,
+          shuffle=True,
+          validation_data=(x_test, x_test))
+
+  encoder_model = Model(inputs=autoencoder.input, outputs=encoded_end)
+  x_train_encoded = encoder_model.predict(x_train)
+  x_test_encoded = encoder_model.predict(x_test)
+
+  return x_train_encoded,x_test_encoded
+
+def train_dae_310(x_train, x_test):
+
+  input_dim = x_train.shape[1]
+  input_layer = Input(shape = (input_dim, ))
+
+  #DAE 處理
+  noise_factor = 0.5
+  x_train_noisy = x_train + noise_factor * np.random.normal(loc=0.0, scale=1.0, size=x_train.shape)
+  x_test_noisy = x_test + noise_factor * np.random.normal(loc=0.0, scale=1.0, size=x_test.shape)
+  x_train_noisy = np.clip(x_train_noisy, 0., 1.)
+  x_test_noisy = np.clip(x_test_noisy, 0., 1.)
+
+  encoded = BatchNormalization()(input_layer)
+  encoded = Dense(int(input_dim*0.9), activation='relu')(encoded)
+
+  encoded = BatchNormalization()(input_layer)
+  encoded = Dense(int(input_dim*0.8), activation='relu')(encoded)
+
+  encoded = BatchNormalization()(encoded)
+  encoded_end = Dense(int(input_dim*0.7), activation='relu')(encoded)
+
+  decoded = BatchNormalization()(encoded_end)
+  decoded = Dense(int(input_dim*0.8), activation='relu')(decoded)
+
+  decoded = BatchNormalization()(encoded_end)
+  decoded = Dense(int(input_dim*0.9), activation='relu')(decoded)
+
+  decoded = BatchNormalization()(decoded)
+  output_layer = Dense(input_dim, activation='sigmoid')(decoded)
+
+  # 訓練
+  autoencoder = Model(input_layer, output_layer)
+  autoencoder.compile(optimizer='adam', loss='binary_crossentropy')
+  autoencoder.fit(x_train, x_train,
+          epochs=100,
+          batch_size=16,
+          shuffle=True,
+          validation_data=(x_test, x_test))
+
+  encoder_model = Model(inputs=autoencoder.input, outputs=encoded_end)
+  x_train_encoded = encoder_model.predict(x_train)
+  x_test_encoded = encoder_model.predict(x_test)
+
+  return x_train_encoded,x_test_encoded
+
+def train_dae_320(x_train, x_test):
+
+  input_dim = x_train.shape[1]
+  input_layer = Input(shape = (input_dim, ))
+
+  #DAE 處理
+  noise_factor = 0.5
+  x_train_noisy = x_train + noise_factor * np.random.normal(loc=0.0, scale=1.0, size=x_train.shape)
+  x_test_noisy = x_test + noise_factor * np.random.normal(loc=0.0, scale=1.0, size=x_test.shape)
+  x_train_noisy = np.clip(x_train_noisy, 0., 1.)
+  x_test_noisy = np.clip(x_test_noisy, 0., 1.)
+
+  encoded = BatchNormalization()(input_layer)
+  encoded = Dense(int(input_dim*0.8), activation='relu')(encoded)
+
+  encoded = BatchNormalization()(input_layer)
+  encoded = Dense(int(input_dim*0.6), activation='relu')(encoded)
+
+  encoded = BatchNormalization()(encoded)
+  encoded_end = Dense(int(input_dim*0.4), activation='relu')(encoded)
+
+  decoded = BatchNormalization()(encoded_end)
+  decoded = Dense(int(input_dim*0.6), activation='relu')(decoded)
+
+  decoded = BatchNormalization()(encoded_end)
+  decoded = Dense(int(input_dim*0.8), activation='relu')(decoded)
+
+  decoded = BatchNormalization()(decoded)
+  output_layer = Dense(input_dim, activation='sigmoid')(decoded)
+
+  # 訓練
+  autoencoder = Model(input_layer, output_layer)
+  autoencoder.compile(optimizer='adam', loss='binary_crossentropy')
+  autoencoder.fit(x_train, x_train,
+          epochs=100,
+          batch_size=16,
+          shuffle=True,
+          validation_data=(x_test, x_test))
+
+  encoder_model = Model(inputs=autoencoder.input, outputs=encoded_end)
+  x_train_encoded = encoder_model.predict(x_train)
+  x_test_encoded = encoder_model.predict(x_test)
+
+  return x_train_encoded,x_test_encoded
+
+def train_dae_330(x_train, x_test):
+
+  input_dim = x_train.shape[1]
+  input_layer = Input(shape = (input_dim, ))
+
+  #DAE 處理
+  noise_factor = 0.5
+  x_train_noisy = x_train + noise_factor * np.random.normal(loc=0.0, scale=1.0, size=x_train.shape)
+  x_test_noisy = x_test + noise_factor * np.random.normal(loc=0.0, scale=1.0, size=x_test.shape)
+  x_train_noisy = np.clip(x_train_noisy, 0., 1.)
+  x_test_noisy = np.clip(x_test_noisy, 0., 1.)
+
+  encoded = BatchNormalization()(input_layer)
+  encoded = Dense(int(input_dim*0.7), activation='relu')(encoded)
+
+  encoded = BatchNormalization()(input_layer)
+  encoded = Dense(int(input_dim*0.4), activation='relu')(encoded)
+
+  encoded = BatchNormalization()(encoded)
+  encoded_end = Dense(int(input_dim*0.1), activation='relu')(encoded)
+
+  decoded = BatchNormalization()(encoded_end)
+  decoded = Dense(int(input_dim*0.4), activation='relu')(decoded)
+
+  decoded = BatchNormalization()(encoded_end)
+  decoded = Dense(int(input_dim*0.7), activation='relu')(decoded)
+
+  decoded = BatchNormalization()(decoded)
+  output_layer = Dense(input_dim, activation='sigmoid')(decoded)
+
+  # 訓練
+  autoencoder = Model(input_layer, output_layer)
+  autoencoder.compile(optimizer='adam', loss='binary_crossentropy')
+  autoencoder.fit(x_train, x_train,
+          epochs=100,
+          batch_size=16,
+          shuffle=True,
+          validation_data=(x_test, x_test))
+
+  encoder_model = Model(inputs=autoencoder.input, outputs=encoded_end)
+  x_train_encoded = encoder_model.predict(x_train)
+  x_test_encoded = encoder_model.predict(x_test)
+
+  return x_train_encoded,x_test_encoded
+
+def train_dae_410(x_train, x_test):
+
+  input_dim = x_train.shape[1]
+  input_layer = Input(shape = (input_dim, ))
+
+  #DAE 處理
+  noise_factor = 0.5
+  x_train_noisy = x_train + noise_factor * np.random.normal(loc=0.0, scale=1.0, size=x_train.shape)
+  x_test_noisy = x_test + noise_factor * np.random.normal(loc=0.0, scale=1.0, size=x_test.shape)
+  x_train_noisy = np.clip(x_train_noisy, 0., 1.)
+  x_test_noisy = np.clip(x_test_noisy, 0., 1.)
+
+  encoded = BatchNormalization()(input_layer)
+  encoded = Dense(int(input_dim*0.9), activation='relu')(encoded)
+
+  encoded = BatchNormalization()(input_layer)
+  encoded = Dense(int(input_dim*0.8), activation='relu')(encoded)
+
+  encoded = BatchNormalization()(input_layer)
+  encoded = Dense(int(input_dim*0.7), activation='relu')(encoded)
+
+  encoded = BatchNormalization()(encoded)
+  encoded_end = Dense(int(input_dim*0.6), activation='relu')(encoded)
+
+  decoded = BatchNormalization()(encoded_end)
+  decoded = Dense(int(input_dim*0.7), activation='relu')(decoded)
+
+  decoded = BatchNormalization()(encoded_end)
+  decoded = Dense(int(input_dim*0.8), activation='relu')(decoded)
+
+  decoded = BatchNormalization()(encoded_end)
+  decoded = Dense(int(input_dim*0.9), activation='relu')(decoded)
+
+  decoded = BatchNormalization()(decoded)
+  output_layer = Dense(input_dim, activation='sigmoid')(decoded)
+
+  # 訓練
+  autoencoder = Model(input_layer, output_layer)
+  autoencoder.compile(optimizer='adam', loss='binary_crossentropy')
+  autoencoder.fit(x_train, x_train,
+          epochs=100,
+          batch_size=16,
+          shuffle=True,
+          validation_data=(x_test, x_test))
+
+  encoder_model = Model(inputs=autoencoder.input, outputs=encoded_end)
+  x_train_encoded = encoder_model.predict(x_train)
+  x_test_encoded = encoder_model.predict(x_test)
+
+  return x_train_encoded,x_test_encoded
+
+def train_dae_420(x_train, x_test):
+
+  input_dim = x_train.shape[1]
+  input_layer = Input(shape = (input_dim, ))
+
+  #DAE 處理
+  noise_factor = 0.5
+  x_train_noisy = x_train + noise_factor * np.random.normal(loc=0.0, scale=1.0, size=x_train.shape)
+  x_test_noisy = x_test + noise_factor * np.random.normal(loc=0.0, scale=1.0, size=x_test.shape)
+  x_train_noisy = np.clip(x_train_noisy, 0., 1.)
+  x_test_noisy = np.clip(x_test_noisy, 0., 1.)
+
+  encoded = BatchNormalization()(input_layer)
+  encoded = Dense(int(input_dim*0.8), activation='relu')(encoded)
+
+  encoded = BatchNormalization()(input_layer)
+  encoded = Dense(int(input_dim*0.6), activation='relu')(encoded)
+
+  encoded = BatchNormalization()(input_layer)
+  encoded = Dense(int(input_dim*0.4), activation='relu')(encoded)
+
+  encoded = BatchNormalization()(encoded)
+  encoded_end = Dense(int(input_dim*0.2), activation='relu')(encoded)
+
+  decoded = BatchNormalization()(encoded_end)
+  decoded = Dense(int(input_dim*0.4), activation='relu')(decoded)
+
+  decoded = BatchNormalization()(encoded_end)
+  decoded = Dense(int(input_dim*0.6), activation='relu')(decoded)
+
+  decoded = BatchNormalization()(encoded_end)
+  decoded = Dense(int(input_dim*0.8), activation='relu')(decoded)
+
+  decoded = BatchNormalization()(decoded)
+  output_layer = Dense(input_dim, activation='sigmoid')(decoded)
+
+  # 訓練
+  autoencoder = Model(input_layer, output_layer)
+  autoencoder.compile(optimizer='adam', loss='binary_crossentropy')
+  autoencoder.fit(x_train, x_train,
+          epochs=100,
+          batch_size=16,
+          shuffle=True,
+          validation_data=(x_test, x_test))
+
+  encoder_model = Model(inputs=autoencoder.input, outputs=encoded_end)
+  x_train_encoded = encoder_model.predict(x_train)
+  x_test_encoded = encoder_model.predict(x_test)
+
+  return x_train_encoded,x_test_encoded
+
+def train_dae_510(x_train, x_test):
+
+  input_dim = x_train.shape[1]
+  input_layer = Input(shape = (input_dim, ))
+
+  #DAE 處理
+  noise_factor = 0.5
+  x_train_noisy = x_train + noise_factor * np.random.normal(loc=0.0, scale=1.0, size=x_train.shape)
+  x_test_noisy = x_test + noise_factor * np.random.normal(loc=0.0, scale=1.0, size=x_test.shape)
+  x_train_noisy = np.clip(x_train_noisy, 0., 1.)
+  x_test_noisy = np.clip(x_test_noisy, 0., 1.)
+
+  encoded = BatchNormalization()(input_layer)
+  encoded = Dense(int(input_dim*0.9), activation='relu')(encoded)
+
+  encoded = BatchNormalization()(input_layer)
+  encoded = Dense(int(input_dim*0.8), activation='relu')(encoded)
+
+  encoded = BatchNormalization()(input_layer)
+  encoded = Dense(int(input_dim*0.7), activation='relu')(encoded)
+
+  encoded = BatchNormalization()(input_layer)
+  encoded = Dense(int(input_dim*0.6), activation='relu')(encoded)
+
+  encoded = BatchNormalization()(encoded)
+  encoded_end = Dense(int(input_dim*0.5), activation='relu')(encoded)
+
+  decoded = BatchNormalization()(encoded_end)
+  decoded = Dense(int(input_dim*0.6), activation='relu')(decoded)
+
+  decoded = BatchNormalization()(encoded_end)
+  decoded = Dense(int(input_dim*0.7), activation='relu')(decoded)
+
+  decoded = BatchNormalization()(encoded_end)
+  decoded = Dense(int(input_dim*0.8), activation='relu')(decoded)
+
+  decoded = BatchNormalization()(encoded_end)
+  decoded = Dense(int(input_dim*0.9), activation='relu')(decoded)
+
+  decoded = BatchNormalization()(decoded)
+  output_layer = Dense(input_dim, activation='sigmoid')(decoded)
+
+  # 訓練
+  autoencoder = Model(input_layer, output_layer)
+  autoencoder.compile(optimizer='adam', loss='binary_crossentropy')
+  autoencoder.fit(x_train, x_train,
+          epochs=100,
+          batch_size=16,
+          shuffle=True,
+          validation_data=(x_test, x_test))
+
+  encoder_model = Model(inputs=autoencoder.input, outputs=encoded_end)
+  x_train_encoded = encoder_model.predict(x_train)
+  x_test_encoded = encoder_model.predict(x_test)
+
+  return x_train_encoded,x_test_encoded
+
+def train_dae_610(x_train, x_test):
+
+  input_dim = x_train.shape[1]
+  input_layer = Input(shape = (input_dim, ))
+
+  #DAE 處理
+  noise_factor = 0.5
+  x_train_noisy = x_train + noise_factor * np.random.normal(loc=0.0, scale=1.0, size=x_train.shape)
+  x_test_noisy = x_test + noise_factor * np.random.normal(loc=0.0, scale=1.0, size=x_test.shape)
+  x_train_noisy = np.clip(x_train_noisy, 0., 1.)
+  x_test_noisy = np.clip(x_test_noisy, 0., 1.)
+
+  encoded = BatchNormalization()(input_layer)
+  encoded = Dense(int(input_dim*0.9), activation='relu')(encoded)
+
+  encoded = BatchNormalization()(input_layer)
+  encoded = Dense(int(input_dim*0.8), activation='relu')(encoded)
+
+  encoded = BatchNormalization()(input_layer)
+  encoded = Dense(int(input_dim*0.7), activation='relu')(encoded)
+
+  encoded = BatchNormalization()(input_layer)
+  encoded = Dense(int(input_dim*0.6), activation='relu')(encoded)
+
+  encoded = BatchNormalization()(input_layer)
+  encoded = Dense(int(input_dim*0.5), activation='relu')(encoded)
+
+  encoded = BatchNormalization()(encoded)
+  encoded_end = Dense(int(input_dim*0.4), activation='relu')(encoded)
+
+  decoded = BatchNormalization()(encoded_end)
+  decoded = Dense(int(input_dim*0.5), activation='relu')(decoded)
+
+  decoded = BatchNormalization()(encoded_end)
+  decoded = Dense(int(input_dim*0.6), activation='relu')(decoded)
+
+  decoded = BatchNormalization()(encoded_end)
+  decoded = Dense(int(input_dim*0.7), activation='relu')(decoded)
+
+  decoded = BatchNormalization()(encoded_end)
+  decoded = Dense(int(input_dim*0.8), activation='relu')(decoded)
+
+  decoded = BatchNormalization()(encoded_end)
+  decoded = Dense(int(input_dim*0.9), activation='relu')(decoded)
+
+  decoded = BatchNormalization()(decoded)
+  output_layer = Dense(input_dim, activation='sigmoid')(decoded)
+
+  # 訓練
+  autoencoder = Model(input_layer, output_layer)
+  autoencoder.compile(optimizer='adam', loss='binary_crossentropy')
+  autoencoder.fit(x_train, x_train,
+          epochs=100,
+          batch_size=16,
+          shuffle=True,
+          validation_data=(x_test, x_test))
+
+  encoder_model = Model(inputs=autoencoder.input, outputs=encoded_end)
+  x_train_encoded = encoder_model.predict(x_train)
+  x_test_encoded = encoder_model.predict(x_test)
+
+  return x_train_encoded,x_test_encoded
+
+def train_dae_710(x_train, x_test):
+
+  input_dim = x_train.shape[1]
+  input_layer = Input(shape = (input_dim, ))
+
+  #DAE 處理
+  noise_factor = 0.5
+  x_train_noisy = x_train + noise_factor * np.random.normal(loc=0.0, scale=1.0, size=x_train.shape)
+  x_test_noisy = x_test + noise_factor * np.random.normal(loc=0.0, scale=1.0, size=x_test.shape)
+  x_train_noisy = np.clip(x_train_noisy, 0., 1.)
+  x_test_noisy = np.clip(x_test_noisy, 0., 1.)
+
+  encoded = BatchNormalization()(input_layer)
+  encoded = Dense(int(input_dim*0.9), activation='relu')(encoded)
+
+  encoded = BatchNormalization()(input_layer)
+  encoded = Dense(int(input_dim*0.8), activation='relu')(encoded)
+
+  encoded = BatchNormalization()(input_layer)
+  encoded = Dense(int(input_dim*0.7), activation='relu')(encoded)
+
+  encoded = BatchNormalization()(input_layer)
+  encoded = Dense(int(input_dim*0.6), activation='relu')(encoded)
+
+  encoded = BatchNormalization()(input_layer)
+  encoded = Dense(int(input_dim*0.5), activation='relu')(encoded)
+
+  encoded = BatchNormalization()(input_layer)
+  encoded = Dense(int(input_dim*0.4), activation='relu')(encoded)
+
+  encoded = BatchNormalization()(encoded)
+  encoded_end = Dense(int(input_dim*0.3), activation='relu')(encoded)
+
+  decoded = BatchNormalization()(encoded_end)
+  decoded = Dense(int(input_dim*0.4), activation='relu')(decoded)
+
+  decoded = BatchNormalization()(encoded_end)
+  decoded = Dense(int(input_dim*0.5), activation='relu')(decoded)
+
+  decoded = BatchNormalization()(encoded_end)
+  decoded = Dense(int(input_dim*0.6), activation='relu')(decoded)
+
+  decoded = BatchNormalization()(encoded_end)
+  decoded = Dense(int(input_dim*0.7), activation='relu')(decoded)
+
+  decoded = BatchNormalization()(encoded_end)
+  decoded = Dense(int(input_dim*0.8), activation='relu')(decoded)
+
+  decoded = BatchNormalization()(encoded_end)
+  decoded = Dense(int(input_dim*0.9), activation='relu')(decoded)
+
+  decoded = BatchNormalization()(decoded)
+  output_layer = Dense(input_dim, activation='sigmoid')(decoded)
+
+  # 訓練
+  autoencoder = Model(input_layer, output_layer)
+  autoencoder.compile(optimizer='adam', loss='binary_crossentropy')
+  autoencoder.fit(x_train, x_train,
+          epochs=100,
+          batch_size=16,
+          shuffle=True,
+          validation_data=(x_test, x_test))
+
+  encoder_model = Model(inputs=autoencoder.input, outputs=encoded_end)
+  x_train_encoded = encoder_model.predict(x_train)
+  x_test_encoded = encoder_model.predict(x_test)
+
+  return x_train_encoded,x_test_encoded
