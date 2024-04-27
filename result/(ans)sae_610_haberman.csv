@@ -1,2 +1,0 @@
-dataset,svm,svm_ae_smote,svm_smote_ae,knn,knn_ae_smote,knn_smote_ae,c45,c45_ae_smote,c45_smote_ae,cart,cart_ae_smote,cart_smote_ae
-haberman,0.5,0.4891503267973857,0.5019689542483661,0.5,0.5058333333333334,0.50625,0.5,0.5,0.5,0.5018055555555556,0.49484477124183,0.5019689542483661

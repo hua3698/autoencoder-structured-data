@@ -1,118 +1,86 @@
 
-import time
-import numpy as np
-import pandas as pd
-import tensorflow
-from imblearn.over_sampling import SMOTE
-from C45 import C45Classifier
+from common import *
+from library import *
 
-from sklearn import preprocessing
-from sklearn.preprocessing import LabelEncoder, label_binarize
-from sklearn.model_selection import StratifiedKFold
-from sklearn.metrics import accuracy_score ,roc_auc_score
-from sklearn.svm import SVC
-from sklearn.neighbors import KNeighborsClassifier
-from sklearn import tree
+def train_dae_210(x_train, x_test):
 
-from tensorflow import keras
-from tensorflow.keras import layers
-from tensorflow.keras.models import Sequential, Model
-from tensorflow.keras.layers import Dense, Activation, Input, BatchNormalization, Lambda
-from tensorflow.keras.utils import plot_model
-from tensorflow.keras import layers,regularizers
+  input_dim = x_train.shape[1]
+  input_layer = Input(shape = (input_dim, ))
 
-from matplotlib import pyplot
+  #DAE 處理
+  noise_factor = 0.5
+  x_train_noisy = x_train + noise_factor * np.random.normal(loc=0.0, scale=1.0, size=x_train.shape)
+  x_test_noisy = x_test + noise_factor * np.random.normal(loc=0.0, scale=1.0, size=x_test.shape)
+  x_train_noisy = np.clip(x_train_noisy, 0., 1.)
+  x_test_noisy = np.clip(x_test_noisy, 0., 1.)
 
+  encoded = BatchNormalization()(input_layer)
+  encoded = Dense(int(input_dim*0.9), activation='relu')(encoded)
 
-def train_orig_svc(x_train, x_test, y_train, y_test):
-  model = SVC()
-  model.fit(x_train, y_train)
-  y_pred = model.predict(x_test)
+  encoded = BatchNormalization()(encoded)
+  encoded_end = Dense(int(input_dim*0.8), activation='relu')(encoded)
 
-  acc = accuracy_score(y_test, y_pred)
-  auc = roc_auc_score(y_test, y_pred, multi_class="ovo")
+  decoded = BatchNormalization()(encoded_end)
+  decoded = Dense(int(input_dim*0.9), activation='relu')(decoded)
 
-  return acc, auc
+  decoded = BatchNormalization()(decoded)
+  output_layer = Dense(input_dim, activation='sigmoid')(decoded)
 
-def train_orig_knn(x_train, x_test, y_train, y_test) :
-  knn = KNeighborsClassifier()
-  knn.fit(x_train, y_train)
-  y_pred = knn.predict(x_test)
+  # 訓練
+  autoencoder = Model(input_layer, output_layer)
+  autoencoder.compile(optimizer='adam', loss='binary_crossentropy')
+  autoencoder.fit(x_train, x_train,
+          epochs=100,
+          batch_size=16,
+          shuffle=True,
+          validation_data=(x_test, x_test))
 
-  #標籤轉換
-  # y_pred = label_binarize(y_pred, classes=yy)
-  # y_test = label_binarize(y_test, classes=yy)
+  encoder_model = Model(inputs=autoencoder.input, outputs=encoded_end)
+  x_train_encoded = encoder_model.predict(x_train)
+  x_test_encoded = encoder_model.predict(x_test)
 
-  #分數
-  acc = accuracy_score(y_test, y_pred)
-  auc = roc_auc_score(y_test, y_pred, multi_class="ovo")
+  return x_train_encoded,x_test_encoded
 
-  return acc, auc
+def train_dae_220(x_train, x_test):
 
+  input_dim = x_train.shape[1]
+  input_layer = Input(shape = (input_dim, ))
 
-def transfer_y(y) :
-  return np.unique(y) # 多分類AUC轉換使用
+  #DAE 處理
+  noise_factor = 0.5
+  x_train_noisy = x_train + noise_factor * np.random.normal(loc=0.0, scale=1.0, size=x_train.shape)
+  x_test_noisy = x_test + noise_factor * np.random.normal(loc=0.0, scale=1.0, size=x_test.shape)
+  x_train_noisy = np.clip(x_train_noisy, 0., 1.)
+  x_test_noisy = np.clip(x_test_noisy, 0., 1.)
 
+  encoded = BatchNormalization()(input_layer)
+  encoded = Dense(int(input_dim*0.8), activation='relu')(encoded)
 
-def data_preprocess(df_train, df_test) :
+  encoded = BatchNormalization()(encoded)
+  encoded_end = Dense(int(input_dim*0.6), activation='relu')(encoded)
 
-  x_train = df_train.drop(['Class'], axis=1)
-  x_test = df_test.drop(['Class'], axis=1)
+  decoded = BatchNormalization()(encoded_end)
+  decoded = Dense(int(input_dim*0.8), activation='relu')(decoded)
 
-  # 特徵縮放
-  minmax = preprocessing.MinMaxScaler()
-  x_train_minmax = minmax.fit_transform(x_train)
-  x_test_minmax = minmax.fit_transform(x_test)
+  decoded = BatchNormalization()(decoded)
+  output_layer = Dense(input_dim, activation='sigmoid')(decoded)
 
-  x_train = pd.DataFrame(x_train_minmax, columns = x_train.columns)
-  x_test = pd.DataFrame(x_test_minmax, columns = x_test.columns)
+  # 訓練
+  autoencoder = Model(input_layer, output_layer)
+  autoencoder.compile(optimizer='adam', loss='binary_crossentropy')
+  autoencoder.fit(x_train, x_train,
+          epochs=100,
+          batch_size=16,
+          shuffle=True,
+          validation_data=(x_test, x_test))
 
-  # Label encode
-  labelencoder = LabelEncoder()
-  y_train = labelencoder.fit_transform(df_train['Class'])
-  y_test = labelencoder.fit_transform(df_test['Class'])
+  encoder_model = Model(inputs=autoencoder.input, outputs=encoded_end)
+  x_train_encoded = encoder_model.predict(x_train)
+  x_test_encoded = encoder_model.predict(x_test)
 
-  return x_train, x_test, y_train, y_test
+  return x_train_encoded,x_test_encoded
 
-  # classifier
-
-def run_svc(x_train, x_test, y_train, y_test):
-
-  model = SVC(kernel='linear')
-  model.fit(x_train, y_train)
-  y_predict = model.predict(x_test)
-
-  return roc_auc_score(y_test, y_predict, multi_class="ovo")
-
-
-def run_knn(x_train, x_test, y_train, y_test):
-
-  model = KNeighborsClassifier()
-  model.fit(x_train, y_train)
-  y_predict = model.predict(x_test)
-
-  return roc_auc_score(y_test, y_predict, multi_class="ovo")
-
-
-def run_c45(x_train, x_test, y_train, y_test):
-
-  model = C45Classifier()
-  model.fit(x_train, y_train)
-  y_predict = model.predict(x_test)
-
-  return roc_auc_score(y_test, y_predict)
-
-
-def run_cart(x_train, x_test, y_train, y_test):
-  
-  model = tree.DecisionTreeClassifier()
-  model.fit(x_train, y_train)
-  y_predict = model.predict(x_test)
-
-  return roc_auc_score(y_test, y_predict)
-
-
-def train_dae_h230(x_train, x_test):
+def train_dae_230(x_train, x_test):
 
   input_dim = x_train.shape[1]
   input_layer = Input(shape = (input_dim, ))
@@ -151,7 +119,7 @@ def train_dae_h230(x_train, x_test):
 
   return x_train_encoded,x_test_encoded
 
-def train_dae_h240(x_train, x_test):
+def train_dae_240(x_train, x_test):
 
   input_dim = x_train.shape[1]
   input_layer = Input(shape = (input_dim, ))

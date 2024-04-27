@@ -1,3 +1,4 @@
+from common import *
 
 def train_orig_svc(x_train, x_test, y_train, y_test):
   model = SVC()
@@ -31,8 +32,21 @@ def transfer_y(y) :
 
 def data_preprocess(df_train, df_test) :
 
+  # Label encode
+  labelencoder = LabelEncoder()
+  y_train = labelencoder.fit_transform(df_train['Class'])
+  y_test = labelencoder.fit_transform(df_test['Class'])
+
   x_train = df_train.drop(['Class'], axis=1)
   x_test = df_test.drop(['Class'], axis=1)
+
+  string_columns = x_train.select_dtypes(include=['object']).columns
+
+  for col in string_columns:
+
+      labelencoder = LabelEncoder()
+      x_train[col] = labelencoder.fit_transform(df_train[col])
+      x_test[col] = labelencoder.fit_transform(x_test[col])
 
   # 特徵縮放
   minmax = preprocessing.MinMaxScaler()
@@ -41,11 +55,6 @@ def data_preprocess(df_train, df_test) :
 
   x_train = pd.DataFrame(x_train_minmax, columns = x_train.columns)
   x_test = pd.DataFrame(x_test_minmax, columns = x_test.columns)
-
-  # Label encode
-  labelencoder = LabelEncoder()
-  y_train = labelencoder.fit_transform(df_train['Class'])
-  y_test = labelencoder.fit_transform(df_test['Class'])
 
   return x_train, x_test, y_train, y_test
 

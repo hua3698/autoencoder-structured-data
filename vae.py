@@ -1,117 +1,104 @@
 
-import time
-import numpy as np
-import pandas as pd
-import tensorflow
-from imblearn.over_sampling import SMOTE
-from C45 import C45Classifier
-
-from sklearn import preprocessing
-from sklearn.preprocessing import LabelEncoder, label_binarize
-from sklearn.model_selection import StratifiedKFold
-from sklearn.metrics import accuracy_score ,roc_auc_score
-from sklearn.svm import SVC
-from sklearn.neighbors import KNeighborsClassifier
-from sklearn import tree
-
-from tensorflow import keras
-from tensorflow.keras import layers
-from tensorflow.keras.models import Sequential, Model
-from tensorflow.keras.layers import Dense, Activation, Input, BatchNormalization, Lambda
-from tensorflow.keras.utils import plot_model
-from tensorflow.keras import layers,regularizers
-
-from matplotlib import pyplot
-
-
-
-def train_orig_svc(x_train, x_test, y_train, y_test):
-  model = SVC()
-  model.fit(x_train, y_train)
-  y_pred = model.predict(x_test)
-
-  acc = accuracy_score(y_test, y_pred)
-  auc = roc_auc_score(y_test, y_pred, multi_class="ovo")
-
-  return acc, auc
-
-def train_orig_knn(x_train, x_test, y_train, y_test) :
-  knn = KNeighborsClassifier()
-  knn.fit(x_train, y_train)
-  y_pred = knn.predict(x_test)
-
-  #標籤轉換
-  # y_pred = label_binarize(y_pred, classes=yy)
-  # y_test = label_binarize(y_test, classes=yy)
-
-  #分數
-  acc = accuracy_score(y_test, y_pred)
-  auc = roc_auc_score(y_test, y_pred, multi_class="ovo")
-
-  return acc, auc
-
-
-def transfer_y(y) :
-  return np.unique(y) # 多分類AUC轉換使用
-
-
-def data_preprocess(df_train, df_test) :
-
-  x_train = df_train.drop(['Class'], axis=1)
-  x_test = df_test.drop(['Class'], axis=1)
-
-  # 特徵縮放
-  minmax = preprocessing.MinMaxScaler()
-  x_train_minmax = minmax.fit_transform(x_train)
-  x_test_minmax = minmax.fit_transform(x_test)
-
-  x_train = pd.DataFrame(x_train_minmax, columns = x_train.columns)
-  x_test = pd.DataFrame(x_test_minmax, columns = x_test.columns)
-
-  # Label encode
-  labelencoder = LabelEncoder()
-  y_train = labelencoder.fit_transform(df_train['Class'])
-  y_test = labelencoder.fit_transform(df_test['Class'])
-
-  return x_train, x_test, y_train, y_test
-
-  # classifier
-
-def run_svc(x_train, x_test, y_train, y_test):
-
-  model = SVC(kernel='linear')
-  model.fit(x_train, y_train)
-  y_predict = model.predict(x_test)
-
-  return roc_auc_score(y_test, y_predict, multi_class="ovo")
-
-def run_knn(x_train, x_test, y_train, y_test):
-
-  model = KNeighborsClassifier()
-  model.fit(x_train, y_train)
-  y_predict = model.predict(x_test)
-
-  return roc_auc_score(y_test, y_predict, multi_class="ovo")
-
-def run_c45(x_train, x_test, y_train, y_test):
-
-  model = C45Classifier()
-  model.fit(x_train, y_train)
-  y_predict = model.predict(x_test)
-
-  return roc_auc_score(y_test, y_predict)
-
-def run_cart(x_train, x_test, y_train, y_test):
-  
-  model = tree.DecisionTreeClassifier()
-  model.fit(x_train, y_train)
-  y_predict = model.predict(x_test)
-
-  return roc_auc_score(y_test, y_predict)
-
-
+from common import *
+from library import *
 import tensorflow.keras.backend as K
 from tensorflow.keras import losses
+
+def train_vae_210(x_train, x_test):
+
+  input_dim = x_train.shape[1]
+
+  latent_dim = input_dim*0.8
+  enc_mean = Dense(latent_dim)
+  enc_log_var = Dense(latent_dim)
+
+  input_layer = Input(shape = (input_dim, ))
+
+  encoded = BatchNormalization()(input_layer)
+  encoded = Dense(int(input_dim*0.9), activation='relu',activity_regularizer=regularizers.l1(10e-5))(encoded)
+
+  encoded = BatchNormalization()(encoded)
+  z_mean = enc_mean(encoded)
+  z_log_var = enc_log_var(encoded)
+  z = Lambda(sampling, output_shape=(latent_dim,))([z_mean, z_log_var])
+
+  decoded = BatchNormalization()(z)
+  decoded = Dense(int(input_dim*0.9), activation='relu')(decoded)
+
+  decoded = BatchNormalization()(decoded)
+  output_layer = Dense(input_dim, activation='sigmoid')(decoded)
+
+  # 訓練
+  vae = Model(input_layer, output_layer)
+
+  #loss
+  reconstruction_loss = input_dim * losses.mean_squared_error(input_layer, output_layer)
+  kl_loss = 1 + z_log_var - K.square(z_mean) - K.exp(z_log_var)
+  kl_loss = K.sum(kl_loss, axis=-1)
+  kl_loss *= -0.5
+  vae_loss = K.mean(reconstruction_loss + kl_loss)
+  vae.add_loss(vae_loss)
+
+  vae.compile(optimizer='adam', loss='binary_crossentropy')
+  vae.fit(x_train, x_train,
+      epochs=100,
+      batch_size=16,
+      shuffle=True,
+      validation_data=(x_test, x_test))
+
+  vae_encoder = Model(vae.input, z_mean)
+  x_train_encoded = vae_encoder.predict(x_train)
+  x_test_encoded = vae_encoder.predict(x_test)
+
+  return x_train_encoded,x_test_encoded
+
+def train_vae_220(x_train, x_test):
+
+  input_dim = x_train.shape[1]
+
+  latent_dim = input_dim*0.6
+  enc_mean = Dense(latent_dim)
+  enc_log_var = Dense(latent_dim)
+
+  input_layer = Input(shape = (input_dim, ))
+
+  encoded = BatchNormalization()(input_layer)
+  encoded = Dense(int(input_dim*0.8), activation='relu',activity_regularizer=regularizers.l1(10e-5))(encoded)
+
+  encoded = BatchNormalization()(encoded)
+  z_mean = enc_mean(encoded)
+  z_log_var = enc_log_var(encoded)
+  z = Lambda(sampling, output_shape=(latent_dim,))([z_mean, z_log_var])
+
+  decoded = BatchNormalization()(z)
+  decoded = Dense(int(input_dim*0.8), activation='relu')(decoded)
+
+  decoded = BatchNormalization()(decoded)
+  output_layer = Dense(input_dim, activation='sigmoid')(decoded)
+
+  # 訓練
+  vae = Model(input_layer, output_layer)
+
+  #loss
+  reconstruction_loss = input_dim * losses.mean_squared_error(input_layer, output_layer)
+  kl_loss = 1 + z_log_var - K.square(z_mean) - K.exp(z_log_var)
+  kl_loss = K.sum(kl_loss, axis=-1)
+  kl_loss *= -0.5
+  vae_loss = K.mean(reconstruction_loss + kl_loss)
+  vae.add_loss(vae_loss)
+
+  vae.compile(optimizer='adam', loss='binary_crossentropy')
+  vae.fit(x_train, x_train,
+      epochs=100,
+      batch_size=16,
+      shuffle=True,
+      validation_data=(x_test, x_test))
+
+  vae_encoder = Model(vae.input, z_mean)
+  x_train_encoded = vae_encoder.predict(x_train)
+  x_test_encoded = vae_encoder.predict(x_test)
+
+  return x_train_encoded,x_test_encoded
 
 def train_vae_230(x_train, x_test):
 
